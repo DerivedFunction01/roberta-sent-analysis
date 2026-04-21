@@ -47,22 +47,40 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-
 def load_label_map() -> dict[str, int]:
-    label_map_path = Path("label2id.json")
-    if label_map_path.exists():
-        with label_map_path.open(encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected a JSON object in {label_map_path}")
-        label2id = {str(label): int(idx) for label, idx in data.items()}
-    else:
-        raise FileNotFoundError(f"Label map not found: {label_map_path}")
+    # Candidate locations in priority order
+    candidates = [
+        Path("label2id.json"),
+        Path("..") / "label2id.json",
+    ]
+
+    label_map_path = None
+    for p in candidates:
+        if p.exists():
+            label_map_path = p
+            break
+
+    if label_map_path is None:
+        raise FileNotFoundError(
+            f"Label map not found in any of: {', '.join(str(c) for c in candidates)}"
+        )
+
+    with label_map_path.open(encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a JSON object in {label_map_path}")
+
+    label2id = {str(label): int(idx) for label, idx in data.items()}
 
     expected_ids = list(range(len(label2id)))
     actual_ids = sorted(label2id.values())
+
     if actual_ids != expected_ids:
-        raise ValueError(f"Label ids must be contiguous starting at 0; got {actual_ids}")
+        raise ValueError(
+            f"Label ids must be contiguous starting at 0; got {actual_ids}"
+        )
+
     return label2id
 
 
