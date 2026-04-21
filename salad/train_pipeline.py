@@ -51,6 +51,8 @@ from salad.defaults import (
     NEUTRAL_SAMPLE_FRACTION,
     NEUTRAL_SPLIT,
     NEUTRAL_TEXT_COLUMN,
+    SALAD_CATEGORY_FILTER_DIR,
+    SALAD_CATEGORY_FILTER_THRESHOLD,
     PIPELINE_RESULTS_DIR,
     REUSE_LIMIT,
     SAME_CLASS_RATIO,
@@ -141,6 +143,8 @@ def main() -> None:
     print(f"Jailbreak benign cache: {JAILBREAK_BENIGN_CACHE_DIR}")
     print(f"Jailbreak filter model: {JAILBREAK_FILTER_MODEL_FILE}")
     print(f"Jailbreak filter threshold: {JAILBREAK_FILTER_THRESHOLD}")
+    print(f"Salad category filter dir: {SALAD_CATEGORY_FILTER_DIR}")
+    print(f"Salad category filter threshold: {SALAD_CATEGORY_FILTER_THRESHOLD}")
     print(f"Outside dataset: {NEUTRAL_DATASET_NAME} / {NEUTRAL_SPLIT}")
     print(f"Tokenizer: roberta-base")
     print(f"Output: {TOKENIZED_DATASET_DIR}")
@@ -198,6 +202,8 @@ def main() -> None:
             "outside_label": OUTSIDE_LABEL,
             "jailbreak_filter_model_file": str(JAILBREAK_FILTER_MODEL_FILE),
             "jailbreak_filter_threshold": JAILBREAK_FILTER_THRESHOLD,
+            "category_filter_dir": str(SALAD_CATEGORY_FILTER_DIR),
+            "category_filter_threshold": SALAD_CATEGORY_FILTER_THRESHOLD,
             "label2id": label2id,
             "id2label": id2label,
             "category_labels": category_labels,

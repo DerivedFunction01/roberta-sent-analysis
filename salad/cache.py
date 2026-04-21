@@ -6,6 +6,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+import joblib
 import pyarrow.parquet as pq
 from datasets import Dataset, load_dataset
 from tqdm.auto import tqdm
@@ -14,9 +15,9 @@ from paths import path
 from salad.defaults import (
     CACHE_DIR,
     DATASET_NAME,
-    JAILBREAK_CACHE_DIR,
     JAILBREAK_BENIGN_CACHE_DIR,
     JAILBREAK_BENIGN_LABEL,
+    JAILBREAK_CACHE_DIR,
     JAILBREAK_DATASET_NAME,
     JAILBREAK_FILTER_MODEL_FILE,
     JAILBREAK_FILTER_THRESHOLD,
@@ -25,9 +26,12 @@ from salad.defaults import (
     JAILBREAK_PROMPT_COLUMN,
     JAILBREAK_SPLIT,
     JAILBREAK_TARGET_LABEL,
+    MAX_LENGTH,
     LABEL_COLUMN,
     MAX_SENTENCES,
     MIN_LATIN_RATIO,
+    SALAD_CATEGORY_FILTER_DIR,
+    SALAD_CATEGORY_FILTER_THRESHOLD,
     NEUTRAL_CACHE_DIR,
     NEUTRAL_DATASET_NAME,
     NEUTRAL_MAX_SENTENCES,
@@ -39,6 +43,7 @@ from salad.defaults import (
     TEXT_COLUMN,
 )
 from salad.jailbreak_filter import load_filter_model
+from salad.labels import slugify_label
 
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -285,6 +290,70 @@ def _filter_openhermes_split(
     return split.select(kept_indices), stats
 
 
+def _chunk_text(text: str, *, max_sentences: int) -> list[str]:
+    segments = _split_jailbreak_segments(text)
+    if not segments:
+        return []
+    if len(segments) <= max_sentences:
+        return [" ".join(segments)]
+    return [" ".join(window) for window in _sliding_windows(segments, max_sentences, stride=1)]
+
+
+def _salad_category_filter_model_file(label: str) -> Path:
+    return SALAD_CATEGORY_FILTER_DIR / slugify_label(label) / "model.joblib"
+
+
+def load_salad_category_filter(label: str) -> Any:
+    model_file = _salad_category_filter_model_file(label)
+    if not model_file.exists():
+        raise FileNotFoundError(f"Missing Salad category filter model for {label!r}: {model_file}")
+    return joblib.load(model_file)
+
+
+def load_salad_category_filters(labels: list[str]) -> dict[str, Any]:
+    return {label: load_salad_category_filter(label) for label in labels}
+
+
+def _filter_salad_chunks(
+    chunks: list[str],
+    *,
+    model: Any,
+    positive_label: str,
+    threshold: float = SALAD_CATEGORY_FILTER_THRESHOLD,
+) -> tuple[list[tuple[int, str, float]], list[float]]:
+    probs = model.predict_proba(chunks)
+    classes = list(model.named_steps["clf"].classes_)
+    if positive_label not in classes:
+        raise ValueError(f"Expected positive class {positive_label!r}, got {classes}")
+    positive_index = classes.index(positive_label)
+    scores = [float(score) for score in probs[:, positive_index]]
+    kept = [(index, chunk, score) for index, (chunk, score) in enumerate(zip(chunks, scores)) if score >= threshold]
+    if not kept and scores:
+        best_index = int(max(range(len(scores)), key=scores.__getitem__))
+        kept = [(best_index, chunks[best_index], scores[best_index])]
+    return kept, scores
+
+
+def _filter_category_text(
+    text: str,
+    *,
+    model: Any,
+    positive_label: str,
+    max_sentences: int,
+    threshold: float = SALAD_CATEGORY_FILTER_THRESHOLD,
+) -> list[tuple[int, str, float]]:
+    chunks = _chunk_text(text, max_sentences=max_sentences)
+    if not chunks:
+        return []
+    if len(chunks) == 1:
+        return [(0, chunks[0], 1.0)]
+    kept_chunks, scores = _filter_salad_chunks(chunks, model=model, positive_label=positive_label, threshold=threshold)
+    if not kept_chunks:
+        best_index = int(max(range(len(scores)), key=scores.__getitem__))
+        return [(best_index, chunks[best_index], scores[best_index])]
+    return kept_chunks
+
+
 def load_clean_salad_cache(cache_dir: Path = CACHE_DIR) -> dict[str, Dataset]:
     meta_file = path("salad", "salad_cache_meta_file")
     if not meta_file.exists():
@@ -323,28 +392,72 @@ def build_clean_salad_cache(
     )
 
     label_names = _dataset_label_names(filtered)
+    category_filter_labels = [label for label in label_names if label not in {OUTSIDE_LABEL, "Jailbreak"}]
+    category_filters = load_salad_category_filters(category_filter_labels)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     label_datasets: dict[str, Dataset] = {}
     cache_files: dict[str, str] = {}
     label_counts: dict[str, int] = {}
+    chunk_filter_stats: dict[str, dict[str, int]] = {}
     for label_index, label_name in enumerate(label_names):
         label_slug = f"{label_index:02d}_{_slugify_label(label_name)}"
-        records = [
-            {
-                "source_id": int(idx),
-                "text": str(row.get(text_column, "")),
-                "label": normalize_label(row[label_column]),
-            }
-            for idx, row in enumerate(filtered)
-            if normalize_label(row[label_column]) == label_name
-        ]
+        records: list[dict[str, Any]] = []
+        stats = {
+            "rows": 0,
+            "kept_rows": 0,
+            "chunked_rows": 0,
+            "generated_chunks": 0,
+            "kept_chunks": 0,
+        }
+        filter_model = category_filters.get(label_name)
+        for idx, row in enumerate(filtered):
+            if normalize_label(row[label_column]) != label_name:
+                continue
+            stats["rows"] += 1
+            text = str(row.get(text_column, "")).strip()
+            if not text:
+                continue
+            if filter_model is not None and sentence_count(text) > max_sentences:
+                chunked_records = _filter_category_text(
+                    text,
+                    model=filter_model,
+                    positive_label=label_name,
+                    max_sentences=max_sentences,
+                    threshold=SALAD_CATEGORY_FILTER_THRESHOLD,
+                )
+                stats["chunked_rows"] += 1
+                stats["generated_chunks"] += len(_chunk_text(text, max_sentences=max_sentences))
+                stats["kept_chunks"] += len(chunked_records)
+                for chunk_index, chunk_text, chunk_score in chunked_records:
+                    records.append(
+                        {
+                            "source_id": int(idx) * 10_000 + chunk_index,
+                            "text": chunk_text,
+                            "label": normalize_label(row[label_column]),
+                            "chunk_index": chunk_index,
+                            "chunk_score": chunk_score,
+                        }
+                    )
+            else:
+                records.append(
+                    {
+                        "source_id": int(idx),
+                        "text": text,
+                        "label": normalize_label(row[label_column]),
+                        "chunk_index": 0,
+                        "chunk_score": 1.0,
+                    }
+                )
+                stats["kept_rows"] += 1
+                stats["kept_chunks"] += 1
         dataset = Dataset.from_list(records)
         out_path = cache_dir / f"{label_slug}.parquet"
         dataset.to_parquet(str(out_path))
         label_datasets[label_name] = dataset
         cache_files[label_name] = str(out_path)
         label_counts[label_name] = len(records)
+        chunk_filter_stats[label_name] = stats
 
     meta = {
         "dataset_name": dataset_name,
@@ -357,6 +470,9 @@ def build_clean_salad_cache(
         "filter_stats": filter_stats,
         "label_counts": label_counts,
         "label_names": label_names,
+        "chunk_filter_stats": chunk_filter_stats,
+        "category_filter_dir": str(SALAD_CATEGORY_FILTER_DIR),
+        "category_filter_threshold": SALAD_CATEGORY_FILTER_THRESHOLD,
         "cache_files": cache_files,
         "total_rows": filter_stats["kept"],
     }
