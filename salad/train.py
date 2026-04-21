@@ -30,6 +30,11 @@ from transformers import (
 from paths import path
 from salad.labels import id2label as build_id2label, load_label_map
 
+from huggingface_hub import login
+with open("hf_token", "r", encoding="utf-8") as f:
+    token = f.read().strip()
+login(token=token)
+
 
 # %%
 # --- Constants ---
@@ -37,7 +42,6 @@ TOKENIZED_DATASET_DIR = path("salad", "salad_tokenized_dataset_dir")
 TRAINING_OUTPUT_DIR = path("salad", "salad_pipeline_results_dir") / "salad-token-classifier"
 MODEL_CHECKPOINT = "roberta-base"
 SEED = 42
-
 
 # %%
 # --- Helpers ---
