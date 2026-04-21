@@ -86,6 +86,29 @@ def _allocate_counts(total: int, ratios: dict[str, float]) -> dict[str, int]:
     return counts
 
 
+def _split_balanced_and_free(total: int, balanced_coverage_ratio: float) -> tuple[int, int]:
+    if total < 0:
+        raise ValueError(f"total must be non-negative, got {total}")
+    if not 0.0 <= balanced_coverage_ratio <= 1.0:
+        raise ValueError(f"balanced_coverage_ratio must be between 0 and 1, got {balanced_coverage_ratio}")
+    balanced = int(math.ceil(total * balanced_coverage_ratio))
+    balanced = min(total, balanced)
+    return balanced, total - balanced
+
+
+def _balanced_label_sequence(total: int) -> list[str]:
+    if total <= 0:
+        return []
+    labels = list(SENTIMENT_LABELS)
+    return [labels[index % len(labels)] for index in range(total)]
+
+
+def _next_label(label: str) -> str:
+    labels = list(SENTIMENT_LABELS)
+    index = labels.index(label)
+    return labels[(index + 1) % len(labels)]
+
+
 def _token_label_ids_for_sentiment(sentiment: str) -> tuple[int, int]:
     if sentiment == "neu":
         return LABEL2ID["O"], LABEL2ID["O"]
@@ -161,6 +184,7 @@ def build_standalone_examples(
     split: Dataset,
     *,
     num_examples: int,
+    balanced_coverage_ratio: float,
     reuse_limit: int,
     seed: int,
     text_column: str = "text",
@@ -192,8 +216,11 @@ def build_standalone_examples(
     records: list[dict[str, str]] = []
     label_counts = {label: 0 for label in SENTIMENT_LABELS}
 
-    for _ in tqdm(range(num_examples), desc="Building standalone examples"):
-        label_a = sampler.sample_label()
+    balanced_count, free_count = _split_balanced_and_free(num_examples, balanced_coverage_ratio)
+    balanced_labels = _balanced_label_sequence(balanced_count)
+    free_labels = [sampler.sample_label() for _ in range(free_count)]
+
+    for label_a in tqdm(balanced_labels + free_labels, desc="Building standalone examples"):
         text_a = sampler.sample_text(label_a)
         label_counts[label_a] += 1
         records.append(
@@ -220,6 +247,7 @@ def build_paired_examples(
     *,
     num_examples: int,
     pair_kind: str,
+    balanced_coverage_ratio: float,
     reuse_limit: int,
     seed: int,
     text_column: str = "text",
@@ -255,13 +283,18 @@ def build_paired_examples(
     records: list[dict[str, str]] = []
     label_counts = {label: 0 for label in SENTIMENT_LABELS}
 
-    for _ in tqdm(range(num_examples), desc=f"Building {pair_kind} pairs"):
-        label_a = sampler.sample_label()
+    balanced_count, free_count = _split_balanced_and_free(num_examples, balanced_coverage_ratio)
+    balanced_labels = _balanced_label_sequence(balanced_count)
+    free_labels = [sampler.sample_label() for _ in range(free_count)]
+
+    for label_a in tqdm(balanced_labels + free_labels, desc=f"Building {pair_kind} pairs"):
         if pair_kind == "same":
             label_b = label_a
         else:
-            other_labels = [label for label in SENTIMENT_LABELS if label != label_a]
-            label_b = sampler.sample_label(other_labels)
+            label_b = _next_label(label_a)
+            if label_b == label_a:
+                other_labels = [label for label in SENTIMENT_LABELS if label != label_a]
+                label_b = sampler.sample_label(other_labels)
 
         text_a = sampler.sample_text(label_a)
         text_b = sampler.sample_text(label_b)
@@ -286,6 +319,7 @@ def build_paired_examples(
         "pool_sizes": {label: len(texts) for label, texts in pools.items()},
         "label_counts": label_counts,
         "pair_kind": pair_kind,
+        "balanced_coverage_ratio": balanced_coverage_ratio,
         "num_examples": len(records),
     }
     return Dataset.from_list(records), summary
@@ -338,6 +372,7 @@ def build_tokenized_split(
     standalone_ratio: float,
     same_class_ratio: float,
     mixed_class_ratio: float,
+    balanced_coverage_ratio: float,
     reuse_limit: int,
     seed: int,
     tokenizer: PreTrainedTokenizerBase,
@@ -364,6 +399,7 @@ def build_tokenized_split(
     standalone, standalone_summary = build_standalone_examples(
         split,
         num_examples=counts["standalone"],
+        balanced_coverage_ratio=balanced_coverage_ratio,
         reuse_limit=reuse_limit,
         seed=seed,
         text_column=text_column,
@@ -379,6 +415,7 @@ def build_tokenized_split(
         split,
         num_examples=counts["same"],
         pair_kind="same",
+        balanced_coverage_ratio=balanced_coverage_ratio,
         reuse_limit=reuse_limit,
         seed=seed,
         text_column=text_column,
@@ -394,6 +431,7 @@ def build_tokenized_split(
         split,
         num_examples=counts["mixed"],
         pair_kind="mixed",
+        balanced_coverage_ratio=balanced_coverage_ratio,
         reuse_limit=reuse_limit,
         seed=seed + 1,
         text_column=text_column,
@@ -444,6 +482,7 @@ def build_tokenized_split(
     tokenized = tokenized.shuffle(seed=seed)
     summary = {
         "counts": counts,
+        "balanced_coverage_ratio": balanced_coverage_ratio,
         "standalone": standalone_summary,
         "same_pairs": same_summary,
         "mixed_pairs": mixed_summary,

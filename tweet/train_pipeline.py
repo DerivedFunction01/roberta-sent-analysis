@@ -17,6 +17,7 @@ from tqdm.auto import tqdm
 from paths import PIPELINE_RESULTS_DIR, TOKENIZED_DATASET_DIR
 from tweet.data import build_tokenized_split
 from tweet.defaults import (
+    BALANCED_COVERAGE_RATIO,
     DATASET_NAME,
     MAX_LENGTH,
     NORMALIZE_ALL_CAPS_DICTIONARY_WORDS,
@@ -80,6 +81,7 @@ def main() -> None:
             standalone_ratio=STANDALONE_RATIO,
             same_class_ratio=SAME_CLASS_RATIO,
             mixed_class_ratio=MIXED_CLASS_RATIO,
+            balanced_coverage_ratio=BALANCED_COVERAGE_RATIO,
             reuse_limit=REUSE_LIMIT,
             seed=seed,
             tokenizer=tokenizer,
@@ -106,6 +108,7 @@ def main() -> None:
             "standalone_ratio": STANDALONE_RATIO,
             "same_class_ratio": SAME_CLASS_RATIO,
             "mixed_class_ratio": MIXED_CLASS_RATIO,
+            "balanced_coverage_ratio": BALANCED_COVERAGE_RATIO,
             "reuse_limit": REUSE_LIMIT,
             "train_examples": TRAIN_EXAMPLES,
             "validation_examples": VALIDATION_EXAMPLES,
