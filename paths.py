@@ -27,6 +27,10 @@ PATHS = {
         "salad_cache_meta_file": PROJECT_ROOT / "salad_cache" / "meta.json",
         "salad_outside_cache_dir": PROJECT_ROOT / "salad_outside_cache",
         "salad_outside_cache_meta_file": PROJECT_ROOT / "salad_outside_cache" / "meta.json",
+        "salad_label_map_file": PROJECT_ROOT / "salad_label2id.json",
+        "salad_tokenized_dataset_dir": PROJECT_ROOT / "salad_tokenized_dataset",
+        "salad_tokenized_dataset_meta": PROJECT_ROOT / "salad_tokenized_dataset" / "cache_meta.json",
+        "salad_pipeline_results_dir": PROJECT_ROOT / "results" / "salad_pipeline",
         "salad_results_dir": PROJECT_ROOT / "results" / "salad_data",
     },
 }
