@@ -14,7 +14,7 @@ from datasets import DatasetDict, load_dataset
 from transformers import AutoTokenizer
 from tqdm.auto import tqdm
 
-from paths import LABEL_MAP_FILE, PIPELINE_RESULTS_DIR, TOKENIZED_DATASET_DIR
+from paths import PIPELINE_RESULTS_DIR, TOKENIZED_DATASET_DIR
 from tweet.data import build_tokenized_split
 from tweet.defaults import (
     DATASET_NAME,
@@ -22,7 +22,9 @@ from tweet.defaults import (
     NORMALIZE_ALL_CAPS_DICTIONARY_WORDS,
     NORMALIZE_UNICODE_ESCAPES,
     REUSE_LIMIT,
+    STANDALONE_RATIO,
     SAME_CLASS_RATIO,
+    MIXED_CLASS_RATIO,
     STRIP_QUOTE_ARTIFACTS,
     SUBSET,
     TEST_EXAMPLES,
@@ -75,7 +77,9 @@ def main() -> None:
         split, summary = build_tokenized_split(
             dataset[split_name],
             num_examples=num_examples,
+            standalone_ratio=STANDALONE_RATIO,
             same_class_ratio=SAME_CLASS_RATIO,
+            mixed_class_ratio=MIXED_CLASS_RATIO,
             reuse_limit=REUSE_LIMIT,
             seed=seed,
             tokenizer=tokenizer,
@@ -92,7 +96,6 @@ def main() -> None:
 
     dataset_dict = DatasetDict(tokenized_splits)
     dataset_dict.save_to_disk(str(TOKENIZED_DATASET_DIR))
-    save_json(LABEL_MAP_FILE, label2id)
     save_json(
         TOKENIZED_DATASET_DIR / "cache_meta.json",
         {
@@ -100,7 +103,9 @@ def main() -> None:
             "subset": SUBSET,
             "model_checkpoint": model_checkpoint,
             "max_length": MAX_LENGTH,
+            "standalone_ratio": STANDALONE_RATIO,
             "same_class_ratio": SAME_CLASS_RATIO,
+            "mixed_class_ratio": MIXED_CLASS_RATIO,
             "reuse_limit": REUSE_LIMIT,
             "train_examples": TRAIN_EXAMPLES,
             "validation_examples": VALIDATION_EXAMPLES,

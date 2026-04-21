@@ -25,3 +25,7 @@ def load_label_map() -> dict[str, int]:
 LABEL2ID = load_label_map()
 ID2LABEL = {idx: label for label, idx in LABEL2ID.items()}
 LABEL_NAMES = [ID2LABEL[idx] for idx in sorted(ID2LABEL)]
+
+SENTIMENT_LABELS = ("neg", "neu", "pos")
+SENTIMENT_LABEL2ID = {label: idx for idx, label in enumerate(SENTIMENT_LABELS)}
+SENTIMENT_ID2LABEL = {idx: label for label, idx in SENTIMENT_LABEL2ID.items()}
