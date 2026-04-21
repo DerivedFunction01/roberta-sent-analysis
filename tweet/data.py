@@ -25,6 +25,7 @@ class PoolSampler:
         self.rng = random.Random(seed)
         self.max_uses = max(1, reuse_limit + 1)
         self.usage_counts = {label: [0] * len(texts) for label, texts in pools.items()}
+        self.current_cycle = 0
         self.label_order = {
             label: sorted(
                 range(len(texts)),
@@ -40,37 +41,82 @@ class PoolSampler:
             label: float(len(texts))
             for label, texts in pools.items()
         }
+        self.balanced_position = self.rng.randrange(len(SENTIMENT_LABELS))
 
     def _eligible_indices(self, label: str) -> list[int]:
         return [
             idx
             for idx, count in enumerate(self.usage_counts[label])
-            if count < self.max_uses
+            if count == self.current_cycle
         ]
 
-    def sample_label(self, labels: list[str] | None = None) -> str:
+    def _advance_cycle(self) -> bool:
+        next_cycle = self.current_cycle + 1
+        if any(
+            any(count == next_cycle for count in counts)
+            for counts in self.usage_counts.values()
+        ):
+            self.current_cycle = next_cycle
+            return True
+        return False
+
+    def _active_labels(self, labels: list[str] | None = None) -> list[str]:
         labels = labels or list(SENTIMENT_LABELS)
+        active = [label for label in labels if self._eligible_indices(label)]
+        while not active and self._advance_cycle():
+            active = [label for label in labels if self._eligible_indices(label)]
+        return active
+
+    def active_labels(self, labels: list[str] | None = None) -> list[str]:
+        return self._active_labels(labels)
+
+    def sample_label(self, labels: list[str] | None = None) -> str:
+        labels = self._active_labels(labels)
+        if not labels:
+            raise RuntimeError("No reusable examples left in any label pool")
         weights = [self.label_weights[label] for label in labels]
         return self.rng.choices(labels, weights=weights, k=1)[0]
+
+    def sample_balanced_label(self, labels: list[str] | None = None) -> str:
+        labels = labels or list(SENTIMENT_LABELS)
+        active = self._active_labels(labels)
+        if not active:
+            raise RuntimeError("No reusable examples left in any label pool")
+        order = labels
+        start = self.balanced_position % len(order)
+        chosen = None
+        for offset in range(len(order)):
+            candidate = order[(start + offset) % len(order)]
+            if candidate in active:
+                chosen = candidate
+                self.balanced_position = (start + offset + 1) % len(order)
+                break
+        if chosen is None:
+            chosen = active[0]
+            self.balanced_position = (start + 1) % len(order)
+        return chosen
 
     def sample_record(self, label: str) -> dict[str, Any]:
         eligible = self._eligible_indices(label)
         if not eligible:
-            raise RuntimeError(f"No reusable examples left in label pool '{label}'")
+            while self._advance_cycle():
+                eligible = self._eligible_indices(label)
+                if eligible:
+                    break
+            if not eligible:
+                raise RuntimeError(f"No reusable examples left in label pool '{label}'")
         counts = self.usage_counts[label]
-        min_uses = min(counts[idx] for idx in eligible)
-        candidates = [idx for idx in eligible if counts[idx] == min_uses]
         order = self.label_order[label]
         start = self.label_positions[label] % len(order)
         index = None
         for offset in range(len(order)):
             candidate = order[(start + offset) % len(order)]
-            if candidate in candidates:
+            if candidate in eligible:
                 index = candidate
                 self.label_positions[label] = (start + offset + 1) % len(order)
                 break
         if index is None:
-            index = candidates[0]
+            index = eligible[0]
             self.label_positions[label] = (start + 1) % len(order)
         self.usage_counts[label][index] += 1
         return self.pools[label][index]
@@ -128,12 +174,6 @@ def _balanced_label_sequence(total: int) -> list[str]:
         return []
     labels = list(SENTIMENT_LABELS)
     return [labels[index % len(labels)] for index in range(total)]
-
-
-def _next_label(label: str) -> str:
-    labels = list(SENTIMENT_LABELS)
-    index = labels.index(label)
-    return labels[(index + 1) % len(labels)]
 
 
 def _token_label_ids_for_sentiment(sentiment: str) -> tuple[int, int]:
@@ -266,7 +306,7 @@ def build_standalone_examples(
     label_counts = {label: 0 for label in SENTIMENT_LABELS}
 
     balanced_count, free_count = _split_balanced_and_free(num_examples, balanced_coverage_ratio)
-    balanced_labels = _balanced_label_sequence(balanced_count)
+    balanced_labels = [sampler.sample_balanced_label() for _ in range(balanced_count)]
     free_labels = [sampler.sample_label() for _ in range(free_count)]
 
     for label_a in tqdm(balanced_labels + free_labels, desc="Building standalone examples"):
@@ -338,17 +378,23 @@ def build_paired_examples(
     label_counts = {label: 0 for label in SENTIMENT_LABELS}
 
     balanced_count, free_count = _split_balanced_and_free(num_examples, balanced_coverage_ratio)
-    balanced_labels = _balanced_label_sequence(balanced_count)
+    balanced_labels = [sampler.sample_balanced_label() for _ in range(balanced_count)]
     free_labels = [sampler.sample_label() for _ in range(free_count)]
 
     for label_a in tqdm(balanced_labels + free_labels, desc=f"Building {pair_kind} pairs"):
         if pair_kind == "same":
             label_b = label_a
         else:
-            label_b = _next_label(label_a)
-            if label_b == label_a:
-                other_labels = [label for label in SENTIMENT_LABELS if label != label_a]
-                label_b = sampler.sample_label(other_labels)
+            active_labels = sampler.active_labels()
+            if len(active_labels) < 2:
+                while sampler._advance_cycle():
+                    active_labels = sampler.active_labels()
+                    if len(active_labels) >= 2:
+                        break
+            other_labels = [label for label in active_labels if label != label_a]
+            if not other_labels:
+                raise RuntimeError("Need at least two active labels to build a mixed pair")
+            label_b = sampler.sample_label(other_labels)
 
         record_a = sampler.sample_record(label_a)
         record_b = sampler.sample_record(label_b)
