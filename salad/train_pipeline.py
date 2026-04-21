@@ -15,16 +15,28 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
 from paths import path
-from salad.cache import ensure_clean_salad_cache, ensure_openhermes_outside_cache, load_local_parquet_dataset
+from salad.cache import (
+    ensure_clean_salad_cache,
+    ensure_jailbreak_benign_cache,
+    ensure_jailbreak_cache,
+    ensure_openhermes_outside_cache,
+)
 from salad.data import build_tokenized_split
 from salad.defaults import (
     BALANCED_COVERAGE_RATIO,
     CACHE_DIR,
     DATASET_NAME,
-    JAILBREAK_PARQUET,
     CONTEXTUAL_MAX_SEGMENTS,
     CONTEXTUAL_MIN_SEGMENTS,
     CONTEXTUAL_PROBABILITY,
+    JAILBREAK_CACHE_DIR,
+    JAILBREAK_BENIGN_CACHE_DIR,
+    JAILBREAK_DATASET_NAME,
+    JAILBREAK_LABEL_COLUMN,
+    JAILBREAK_MAX_SENTENCES,
+    JAILBREAK_PROMPT_COLUMN,
+    JAILBREAK_SPLIT,
+    JAILBREAK_TARGET_LABEL,
     LABEL_COLUMN,
     MAX_LENGTH,
     MAX_SENTENCES,
@@ -79,8 +91,25 @@ def main() -> None:
         sample_fraction=NEUTRAL_SAMPLE_FRACTION,
         cache_dir=NEUTRAL_CACHE_DIR,
     )
+    jailbreak_benign_split, jailbreak_benign_meta = ensure_jailbreak_benign_cache(
+        JAILBREAK_DATASET_NAME,
+        split_name=JAILBREAK_SPLIT,
+        prompt_column=JAILBREAK_PROMPT_COLUMN,
+        label_column=JAILBREAK_LABEL_COLUMN,
+        target_label="benign",
+        max_sentences=JAILBREAK_MAX_SENTENCES,
+        cache_dir=JAILBREAK_BENIGN_CACHE_DIR,
+    )
 
-    jailbreak_split = load_local_parquet_dataset(JAILBREAK_PARQUET)
+    jailbreak_split, jailbreak_meta = ensure_jailbreak_cache(
+        JAILBREAK_DATASET_NAME,
+        split_name=JAILBREAK_SPLIT,
+        prompt_column=JAILBREAK_PROMPT_COLUMN,
+        label_column=JAILBREAK_LABEL_COLUMN,
+        target_label=JAILBREAK_TARGET_LABEL,
+        max_sentences=JAILBREAK_MAX_SENTENCES,
+        cache_dir=JAILBREAK_CACHE_DIR,
+    )
     jailbreak_label = "Jailbreak"
 
     label2id = load_label_map()
@@ -91,7 +120,9 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained("roberta-base", use_fast=True)
     mutator = TweetMutator() if USE_SALAD_MUTATION else None
 
-    combined_split = concatenate_datasets([*unsafe_label_splits.values(), jailbreak_split, outside_split])
+    combined_split = concatenate_datasets(
+        [*unsafe_label_splits.values(), jailbreak_split, jailbreak_benign_split, outside_split]
+    )
 
     if TOKENIZED_DATASET_DIR.exists():
         shutil.rmtree(TOKENIZED_DATASET_DIR)
@@ -103,12 +134,18 @@ def main() -> None:
     print("=" * 80)
     print(f"Unsafe dataset: {DATASET_NAME} / {SUBSET}")
     print(f"Label groups: {category_labels}")
-    print(f"Jailbreak parquet: {JAILBREAK_PARQUET}")
+    print(f"Jailbreak dataset: {JAILBREAK_DATASET_NAME} / {JAILBREAK_SPLIT}")
+    print(f"Jailbreak cache: {JAILBREAK_CACHE_DIR}")
+    print(f"Jailbreak benign cache: {JAILBREAK_BENIGN_CACHE_DIR}")
     print(f"Outside dataset: {NEUTRAL_DATASET_NAME} / {NEUTRAL_SPLIT}")
     print(f"Tokenizer: roberta-base")
     print(f"Output: {TOKENIZED_DATASET_DIR}")
     print(f"Label map: {path('salad', 'salad_label_map_file')}")
     print(f"Unsafe kept rows: {cache_meta['filter_stats']['kept']}")
+    print(f"Jailbreak kept prompts: {jailbreak_meta['stats']['kept_prompts']}")
+    print(f"Jailbreak generated chunks: {jailbreak_meta['stats']['generated_chunks']}")
+    print(f"Jailbreak benign kept prompts: {jailbreak_benign_meta['stats']['kept_prompts']}")
+    print(f"Jailbreak benign generated chunks: {jailbreak_benign_meta['stats']['generated_chunks']}")
     print(f"Outside kept rows: {outside_meta['filter_stats']['kept']}")
 
     split_specs = [

@@ -14,6 +14,15 @@ from paths import path
 from salad.defaults import (
     CACHE_DIR,
     DATASET_NAME,
+    JAILBREAK_CACHE_DIR,
+    JAILBREAK_BENIGN_CACHE_DIR,
+    JAILBREAK_BENIGN_LABEL,
+    JAILBREAK_DATASET_NAME,
+    JAILBREAK_LABEL_COLUMN,
+    JAILBREAK_MAX_SENTENCES,
+    JAILBREAK_PROMPT_COLUMN,
+    JAILBREAK_SPLIT,
+    JAILBREAK_TARGET_LABEL,
     LABEL_COLUMN,
     MAX_SENTENCES,
     MIN_LATIN_RATIO,
@@ -30,6 +39,7 @@ from salad.defaults import (
 
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+NEWLINE_SPLIT_RE = re.compile(r"(?:\r?\n){1,2}")
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
@@ -171,6 +181,48 @@ def _first_human_turn(conversations: Any) -> str:
             continue
         return str(turn.get("value", "")).strip()
     return ""
+
+
+def _split_jailbreak_segments(text: str) -> list[str]:
+    normalized = text.replace("\r\n", "\n").strip()
+    if not normalized:
+        return []
+    pieces = [piece.strip() for piece in NEWLINE_SPLIT_RE.split(normalized) if piece.strip()]
+    segments: list[str] = []
+    for piece in pieces:
+        sentence_parts = [part.strip() for part in SENTENCE_SPLIT_RE.split(piece) if part.strip()]
+        if sentence_parts:
+            segments.extend(sentence_parts)
+        else:
+            segments.append(piece)
+    return segments
+
+
+def _sliding_windows(items: list[str], window_size: int, stride: int = 1) -> list[list[str]]:
+    if window_size <= 0:
+        raise ValueError(f"window_size must be positive, got {window_size}")
+    if stride <= 0:
+        raise ValueError(f"stride must be positive, got {stride}")
+    if not items:
+        return []
+    if len(items) <= window_size:
+        return [items]
+    windows: list[list[str]] = []
+    for start in range(0, len(items) - window_size + 1, stride):
+        windows.append(items[start : start + window_size])
+    tail_start = len(items) - window_size
+    if windows and windows[-1] != items[tail_start:]:
+        windows.append(items[tail_start:])
+    return windows
+
+
+def _chunk_jailbreak_prompt(prompt: str, *, max_sentences: int = JAILBREAK_MAX_SENTENCES) -> list[str]:
+    sentences = _split_jailbreak_segments(prompt)
+    if not sentences:
+        return []
+    if len(sentences) <= max_sentences:
+        return [" ".join(sentences)]
+    return [" ".join(window) for window in _sliding_windows(sentences, max_sentences, stride=1)]
 
 
 def _filter_openhermes_split(
@@ -331,6 +383,205 @@ def load_openhermes_outside_cache(cache_dir: Path = NEUTRAL_CACHE_DIR) -> Datase
     if not out_path.exists():
         raise FileNotFoundError(f"Missing OpenHermes outside cache file: {out_path}")
     return load_local_parquet_dataset(out_path)
+
+
+def load_jailbreak_cache(cache_dir: Path = JAILBREAK_CACHE_DIR) -> Dataset:
+    meta_file = path("salad", "salad_jailbreak_cache_meta_file")
+    if not meta_file.exists():
+        raise FileNotFoundError(f"Missing jailbreak cache metadata: {meta_file}")
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    cache_file = meta.get("cache_file")
+    if not isinstance(cache_file, str):
+        raise ValueError(f"Malformed jailbreak cache metadata in {meta_file}")
+    out_path = Path(cache_file)
+    if not out_path.exists():
+        raise FileNotFoundError(f"Missing jailbreak cache file: {out_path}")
+    return load_local_parquet_dataset(out_path)
+
+
+def _build_jackhhao_classification_cache(
+    dataset_name: str = JAILBREAK_DATASET_NAME,
+    *,
+    split_name: str = JAILBREAK_SPLIT,
+    prompt_column: str = JAILBREAK_PROMPT_COLUMN,
+    label_column: str = JAILBREAK_LABEL_COLUMN,
+    target_label: str = JAILBREAK_TARGET_LABEL,
+    output_label: str = "Jailbreak",
+    max_sentences: int = JAILBREAK_MAX_SENTENCES,
+    cache_dir: Path = JAILBREAK_CACHE_DIR,
+) -> tuple[Dataset, dict[str, Any]]:
+    raw = _load_split(dataset_name, None, split_name)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    stats = {
+        "total": 0,
+        "kept_prompts": 0,
+        "dropped_empty": 0,
+        "dropped_label": 0,
+        "dropped_no_chunks": 0,
+        "generated_chunks": 0,
+    }
+    records: list[dict[str, Any]] = []
+    for fallback_source_id, row in enumerate(tqdm(raw, desc="Filtering jailbreak prompts")):
+        stats["total"] += 1
+        label = str(row.get(label_column, "")).strip().lower()
+        if label != target_label:
+            stats["dropped_label"] += 1
+            continue
+        prompt = str(row.get(prompt_column, "")).strip()
+        if not prompt:
+            stats["dropped_empty"] += 1
+            continue
+        chunks = _chunk_jailbreak_prompt(prompt, max_sentences=max_sentences)
+        if not chunks:
+            stats["dropped_no_chunks"] += 1
+            continue
+        stats["kept_prompts"] += 1
+        for chunk_index, chunk in enumerate(chunks):
+            records.append(
+                {
+                    "source_id": fallback_source_id * 10_000 + chunk_index,
+                    "text": chunk,
+                    "label": output_label,
+                    "prompt_source_id": fallback_source_id,
+                    "chunk_index": chunk_index,
+                }
+            )
+        stats["generated_chunks"] += len(chunks)
+
+    dataset = Dataset.from_list(records)
+    out_path = cache_dir / "jailbreak.parquet"
+    dataset.to_parquet(str(out_path))
+    meta = {
+        "dataset_name": dataset_name,
+        "split_name": split_name,
+        "prompt_column": prompt_column,
+        "label_column": label_column,
+        "target_label": target_label,
+        "output_label": output_label,
+        "max_sentences": max_sentences,
+        "stats": stats,
+        "cache_file": str(out_path),
+        "total_rows": len(dataset),
+        "label": output_label,
+    }
+    return dataset, meta
+
+
+def build_jailbreak_cache(
+    dataset_name: str = JAILBREAK_DATASET_NAME,
+    *,
+    split_name: str = JAILBREAK_SPLIT,
+    prompt_column: str = JAILBREAK_PROMPT_COLUMN,
+    label_column: str = JAILBREAK_LABEL_COLUMN,
+    target_label: str = JAILBREAK_TARGET_LABEL,
+    max_sentences: int = JAILBREAK_MAX_SENTENCES,
+    cache_dir: Path = JAILBREAK_CACHE_DIR,
+) -> tuple[Dataset, dict[str, Any]]:
+    dataset, meta = _build_jackhhao_classification_cache(
+        dataset_name=dataset_name,
+        split_name=split_name,
+        prompt_column=prompt_column,
+        label_column=label_column,
+        target_label=target_label,
+        output_label="Jailbreak",
+        max_sentences=max_sentences,
+        cache_dir=cache_dir,
+    )
+    save_json(path("salad", "salad_jailbreak_cache_meta_file"), meta)
+    return dataset, meta
+
+
+def build_jailbreak_benign_cache(
+    dataset_name: str = JAILBREAK_DATASET_NAME,
+    *,
+    split_name: str = JAILBREAK_SPLIT,
+    prompt_column: str = JAILBREAK_PROMPT_COLUMN,
+    label_column: str = JAILBREAK_LABEL_COLUMN,
+    target_label: str = "benign",
+    max_sentences: int = JAILBREAK_MAX_SENTENCES,
+    cache_dir: Path = JAILBREAK_BENIGN_CACHE_DIR,
+) -> tuple[Dataset, dict[str, Any]]:
+    dataset, meta = _build_jackhhao_classification_cache(
+        dataset_name=dataset_name,
+        split_name=split_name,
+        prompt_column=prompt_column,
+        label_column=label_column,
+        target_label=target_label,
+        output_label=JAILBREAK_BENIGN_LABEL,
+        max_sentences=max_sentences,
+        cache_dir=cache_dir,
+    )
+    save_json(path("salad", "salad_jailbreak_benign_cache_meta_file"), meta)
+    return dataset, meta
+
+
+def ensure_jailbreak_cache(
+    dataset_name: str = JAILBREAK_DATASET_NAME,
+    *,
+    split_name: str = JAILBREAK_SPLIT,
+    prompt_column: str = JAILBREAK_PROMPT_COLUMN,
+    label_column: str = JAILBREAK_LABEL_COLUMN,
+    target_label: str = JAILBREAK_TARGET_LABEL,
+    max_sentences: int = JAILBREAK_MAX_SENTENCES,
+    cache_dir: Path = JAILBREAK_CACHE_DIR,
+) -> tuple[Dataset, dict[str, Any]]:
+    meta_file = path("salad", "salad_jailbreak_cache_meta_file")
+    if meta_file.exists():
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        cache_file = meta.get("cache_file")
+        if isinstance(cache_file, str) and Path(cache_file).exists():
+            return load_jailbreak_cache(cache_dir=cache_dir), meta
+    return build_jailbreak_cache(
+        dataset_name=dataset_name,
+        split_name=split_name,
+        prompt_column=prompt_column,
+        label_column=label_column,
+        target_label=target_label,
+        max_sentences=max_sentences,
+        cache_dir=cache_dir,
+    )
+
+
+def load_jailbreak_benign_cache(cache_dir: Path = JAILBREAK_BENIGN_CACHE_DIR) -> Dataset:
+    meta_file = path("salad", "salad_jailbreak_benign_cache_meta_file")
+    if not meta_file.exists():
+        raise FileNotFoundError(f"Missing jailbreak benign cache metadata: {meta_file}")
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    cache_file = meta.get("cache_file")
+    if not isinstance(cache_file, str):
+        raise ValueError(f"Malformed jailbreak benign cache metadata in {meta_file}")
+    out_path = Path(cache_file)
+    if not out_path.exists():
+        raise FileNotFoundError(f"Missing jailbreak benign cache file: {out_path}")
+    return load_local_parquet_dataset(out_path)
+
+
+def ensure_jailbreak_benign_cache(
+    dataset_name: str = JAILBREAK_DATASET_NAME,
+    *,
+    split_name: str = JAILBREAK_SPLIT,
+    prompt_column: str = JAILBREAK_PROMPT_COLUMN,
+    label_column: str = JAILBREAK_LABEL_COLUMN,
+    target_label: str = "benign",
+    max_sentences: int = JAILBREAK_MAX_SENTENCES,
+    cache_dir: Path = JAILBREAK_BENIGN_CACHE_DIR,
+) -> tuple[Dataset, dict[str, Any]]:
+    meta_file = path("salad", "salad_jailbreak_benign_cache_meta_file")
+    if meta_file.exists():
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        cache_file = meta.get("cache_file")
+        if isinstance(cache_file, str) and Path(cache_file).exists():
+            return load_jailbreak_benign_cache(cache_dir=cache_dir), meta
+    return build_jailbreak_benign_cache(
+        dataset_name=dataset_name,
+        split_name=split_name,
+        prompt_column=prompt_column,
+        label_column=label_column,
+        target_label=target_label,
+        max_sentences=max_sentences,
+        cache_dir=cache_dir,
+    )
 
 
 def build_openhermes_outside_cache(
