@@ -175,11 +175,11 @@ def make_trainer(
     compute_metrics,
     output_dir: str,
     epochs: float = 2,
-    eval_steps: int = 100,
-    save_steps: int = 100,
+    eval_steps: int = 500,
+    save_steps: int = 500,
     train_batch_size: int = 8,
     eval_batch_size: int = 8,
-    gradient_accumulation_steps: int = 4,
+    gradient_accumulation_steps: int = 2,
 ):
     return Trainer(
         model=model,
