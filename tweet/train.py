@@ -33,7 +33,7 @@ BASE_DIR = Path(".")
 TOKENIZED_DATASET_DIR = BASE_DIR / "tokenized_dataset"
 STANDALONE_RESULTS_DIR = BASE_DIR / "results" / "tweet_eval_standalone"
 
-MODEL_CHECKPOINT = "roberta-base"
+MODEL_CHECKPOINT = "cardiffnlp/twitter-roberta-base-2021-124m"
 SEED = 42
 
 # %%
@@ -228,7 +228,7 @@ if test_dataset is not None:
 # --- Tokenizer ---
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 model = AutoModelForTokenClassification.from_pretrained(
-    MODEL_CHECKPOINT,
+    "roberta-base",
     num_labels=len(label2id),
     id2label=id2label,
     label2id=label2id,
