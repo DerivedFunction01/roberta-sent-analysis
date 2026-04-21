@@ -14,7 +14,7 @@ from datasets import DatasetDict, load_dataset
 from transformers import AutoTokenizer
 from tqdm.auto import tqdm
 
-from paths import PIPELINE_RESULTS_DIR, TOKENIZED_DATASET_DIR
+from paths import LABEL_MAP_FILE, PIPELINE_RESULTS_DIR, TOKENIZED_DATASET_DIR
 from tweet.data import build_tokenized_split
 from tweet.defaults import (
     DATASET_NAME,
@@ -30,6 +30,7 @@ from tweet.defaults import (
     USE_TWEET_MUTATION,
     VALIDATION_EXAMPLES,
 )
+from tweet.labels import LABEL2ID
 from text_utils.mutations import TweetMutator
 
 
@@ -39,26 +40,8 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-def load_label_map() -> dict[str, int]:
-    label_map_path = Path("label2id.json")
-    if label_map_path.exists():
-        with label_map_path.open(encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected a JSON object in {label_map_path}")
-        label2id = {str(label): int(idx) for label, idx in data.items()}
-    else:
-        raise FileNotFoundError(f"Label map not found: {label_map_path}")
-
-    expected_ids = list(range(len(label2id)))
-    actual_ids = sorted(label2id.values())
-    if actual_ids != expected_ids:
-        raise ValueError(f"Label ids must be contiguous starting at 0; got {actual_ids}")
-    return label2id
-
-
 def main() -> None:
-    label2id = load_label_map()
+    label2id = LABEL2ID
     model_checkpoint = "roberta-base"
     seed = 42
     tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, use_fast=True)
@@ -109,7 +92,7 @@ def main() -> None:
 
     dataset_dict = DatasetDict(tokenized_splits)
     dataset_dict.save_to_disk(str(TOKENIZED_DATASET_DIR))
-    save_json(Path("label2id.json"), label2id)
+    save_json(LABEL_MAP_FILE, label2id)
     save_json(
         TOKENIZED_DATASET_DIR / "cache_meta.json",
         {

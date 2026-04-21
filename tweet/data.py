@@ -8,8 +8,6 @@ import numpy as np
 from datasets import Dataset, DatasetDict, load_dataset
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerBase
-
-from tweet.config import ID2LABEL, LABEL2ID, LABEL_NAMES
 from tweet.preprocess import clean_tweet_text
 from text_utils.mutations import TweetMutator
 
@@ -44,7 +42,6 @@ class PoolSampler:
         ]
 
     def sample_label(self, labels: list[str] | None = None) -> str:
-        labels = labels or LABEL_NAMES
         weights = [self.label_weights[label] for label in labels]
         return self.rng.choices(labels, weights=weights, k=1)[0]
 

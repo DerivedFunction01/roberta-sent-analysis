@@ -5,6 +5,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
+LABEL_MAP_FILE = PROJECT_ROOT / "label2id.json"
 TOKENIZED_DATASET_DIR = PROJECT_ROOT / "tokenized_dataset"
 TOKENIZED_DATASET_META = TOKENIZED_DATASET_DIR / "cache_meta.json"
 
