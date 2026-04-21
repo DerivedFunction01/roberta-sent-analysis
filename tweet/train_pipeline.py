@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from datasets import DatasetDict, load_dataset
 from transformers import AutoTokenizer
@@ -27,8 +32,6 @@ from tweet.defaults import (
 )
 from text_utils.mutations import TweetMutator
 
-DEFAULT_LABEL2ID = {"neg": 0, "neu": 1, "pos": 2}
-
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,7 +48,7 @@ def load_label_map() -> dict[str, int]:
             raise ValueError(f"Expected a JSON object in {label_map_path}")
         label2id = {str(label): int(idx) for label, idx in data.items()}
     else:
-        label2id = dict(DEFAULT_LABEL2ID)
+        raise FileNotFoundError(f"Label map not found: {label_map_path}")
 
     expected_ids = list(range(len(label2id)))
     actual_ids = sorted(label2id.values())

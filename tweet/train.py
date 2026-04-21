@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+# %% [markdown]
+# # Tweet Sentiment Token Classification
+# Fine-tunes RoBERTa on the tokenized tweet sentiment cache built by `train_pipeline.py`.
+
+# %%
+# --- Environment Setup ---
 import json
 import multiprocessing as mp
+import sys
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 import torch
@@ -16,18 +27,19 @@ from transformers import (
     TrainingArguments,
 )
 
+# %%
+# --- Constants ---
 BASE_DIR = Path(".")
 TOKENIZED_DATASET_DIR = BASE_DIR / "tokenized_dataset"
 STANDALONE_RESULTS_DIR = BASE_DIR / "results" / "tweet_eval_standalone"
 
 MODEL_CHECKPOINT = "roberta-base"
-TRAIN_BATCH_SIZE = 8
-EVAL_BATCH_SIZE = 8
-EPOCHS = 3.0
-LEARNING_RATE = 2e-5
 SEED = 42
 
-DEFAULT_LABEL2ID = {"neg": 0, "neu": 1, "pos": 2}
+# %%
+# --- Helpers ---
+def get_workers(split: int = 2) -> int:
+    return max(1, mp.cpu_count() // split)
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
@@ -45,7 +57,7 @@ def load_label_map() -> dict[str, int]:
             raise ValueError(f"Expected a JSON object in {label_map_path}")
         label2id = {str(label): int(idx) for label, idx in data.items()}
     else:
-        label2id = dict(DEFAULT_LABEL2ID)
+        raise FileNotFoundError(f"Label map not found: {label_map_path}")
 
     expected_ids = list(range(len(label2id)))
     actual_ids = sorted(label2id.values())
@@ -121,102 +133,138 @@ def make_compute_metrics(id2label: dict[int, str]):
     return compute_metrics
 
 
-def main() -> None:
-    torch.manual_seed(SEED)
-    np.random.seed(SEED)
-
-    label2id = load_label_map()
-    id2label = {idx: label for label, idx in label2id.items()}
-    splits = load_tokenized_cache(TOKENIZED_DATASET_DIR)
-
-    train_dataset = choose_split(splits, "train")
-    validation_dataset = choose_split(splits, "validation", "eval", "dev")
-    test_dataset = choose_split(splits, "test", "validation", "eval", "dev", required=False)
-
-    STANDALONE_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT, use_fast=True)
-    model = AutoModelForTokenClassification.from_pretrained(
-        MODEL_CHECKPOINT,
-        num_labels=len(label2id),
-        id2label=id2label,
-        label2id=label2id,
-    )
-
-    data_collator = DataCollatorForTokenClassification(tokenizer)
-    training_args = TrainingArguments(
-        output_dir=str(STANDALONE_RESULTS_DIR / "checkpoints"),
-        per_device_train_batch_size=TRAIN_BATCH_SIZE,
-        per_device_eval_batch_size=EVAL_BATCH_SIZE,
-        num_train_epochs=EPOCHS,
-        learning_rate=LEARNING_RATE,
-        eval_strategy="epoch",
-        save_strategy="epoch",
+def make_training_args(
+    output_dir: str,
+    *,
+    train_batch_size: int,
+    eval_batch_size: int,
+    eval_steps: int,
+    save_steps: int,
+    epochs: float,
+    gradient_accumulation_steps: int,
+):
+    return TrainingArguments(
+        output_dir=output_dir,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=train_batch_size,
+        per_device_eval_batch_size=eval_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=5e-5,
+        weight_decay=0.01,
+        eval_strategy="steps",
+        save_strategy="steps",
+        eval_steps=eval_steps,
+        save_steps=save_steps,
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
-        greater_is_better=True,
-        report_to=[],
-        seed=SEED,
-        save_total_limit=2,
-        logging_strategy="steps",
-        logging_steps=50,
         fp16=torch.cuda.is_available(),
-        dataloader_num_workers=max(1, mp.cpu_count() // 2),
+        logging_steps=max(1, min(eval_steps, save_steps) // 2),
+        save_total_limit=2,
+        report_to="tensorboard",
+        seed=SEED,
+        dataloader_num_workers=get_workers(),
     )
 
-    trainer = Trainer(
+
+def make_trainer(
+    *,
+    model,
+    train_dataset,
+    eval_dataset,
+    data_collator,
+    compute_metrics,
+    output_dir: str,
+    epochs: float = 2,
+    eval_steps: int = 100,
+    save_steps: int = 100,
+    train_batch_size: int = 8,
+    eval_batch_size: int = 8,
+    gradient_accumulation_steps: int = 4,
+):
+    return Trainer(
         model=model,
-        args=training_args,
+        args=make_training_args(
+            output_dir,
+            train_batch_size=train_batch_size,
+            eval_batch_size=eval_batch_size,
+            eval_steps=eval_steps,
+            save_steps=save_steps,
+            epochs=epochs,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+        ),
         train_dataset=train_dataset,
-        eval_dataset=validation_dataset,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
-        compute_metrics=make_compute_metrics(id2label),
+        compute_metrics=compute_metrics,
     )
 
-    print("=" * 80)
-    print("TRAINING TWEET SENTIMENT TOKEN CLASSIFIER")
-    print("=" * 80)
-    print(f"Data dir: {TOKENIZED_DATASET_DIR}")
-    print(f"Model: {MODEL_CHECKPOINT}")
-    print(f"Labels: {label2id}")
-    print(f"Train size: {len(train_dataset)}")
-    print(f"Validation size: {len(validation_dataset)}")
-    if test_dataset is not None:
-        print(f"Test size: {len(test_dataset)}")
-    print(f"Output: {STANDALONE_RESULTS_DIR}")
 
-    first_example = train_dataset[0]
-    tokens = tokenizer.convert_ids_to_tokens(first_example["input_ids"])
-    labels = [id2label[label] for label in first_example["labels"] if label != -100]
-    print(f"Sample tokens: {tokens}")
-    print(f"Sample labels: {labels}")
+# %%
+# --- Reproducibility ---
+torch.manual_seed(SEED)
+np.random.seed(SEED)
 
-    trainer.train()
-    validation_metrics = trainer.evaluate(validation_dataset)
-    test_metrics = None
-    if test_dataset is not None:
-        test_predictions = trainer.predict(test_dataset)
-        test_metrics = make_compute_metrics(id2label)((test_predictions.predictions, test_predictions.label_ids))
+# %%
+# --- Label Map ---
+label2id = load_label_map()
+id2label = {idx: label for label, idx in label2id.items()}
 
-    trainer.save_model(str(STANDALONE_RESULTS_DIR / "final_model"))
-    tokenizer.save_pretrained(str(STANDALONE_RESULTS_DIR / "final_model"))
-    save_json(
-        STANDALONE_RESULTS_DIR / "results.json",
-        {
-            "data_dir": str(TOKENIZED_DATASET_DIR),
-            "model_checkpoint": MODEL_CHECKPOINT,
-            "label2id": label2id,
-            "validation_metrics": validation_metrics,
-            "test_metrics": test_metrics,
-            "train_size": len(train_dataset),
-            "validation_size": len(validation_dataset),
-            "test_size": len(test_dataset) if test_dataset is not None else None,
-        },
-    )
+# %%
+# --- Tokenized Cache ---
+splits = load_tokenized_cache(TOKENIZED_DATASET_DIR)
 
-    print("\nSaved:")
-    print(f"  {STANDALONE_RESULTS_DIR / 'results.json'}")
-    print(f"  {STANDALONE_RESULTS_DIR / 'final_model'}")
+train_dataset = choose_split(splits, "train")
+validation_dataset = choose_split(splits, "validation", "eval", "dev")
+test_dataset = choose_split(splits, "test", "validation", "eval", "dev", required=False)
 
+if train_dataset is None or validation_dataset is None:
+    raise RuntimeError("Missing required train or validation split in tokenized cache")
 
-if __name__ == "__main__":
-    main()
+print(f"Train: {len(train_dataset)} | Validation: {len(validation_dataset)}")
+if test_dataset is not None:
+    print(f"Test: {len(test_dataset)}")
+
+# %%
+# --- Tokenizer ---
+tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
+model = AutoModelForTokenClassification.from_pretrained(
+    MODEL_CHECKPOINT,
+    num_labels=len(label2id),
+    id2label=id2label,
+    label2id=label2id,
+)
+# %%
+# --- Sample Inspection ---
+first_example = train_dataset[0]
+tokens = tokenizer.convert_ids_to_tokens(first_example["input_ids"])
+labels = [id2label[label] for label in first_example["labels"] if label != -100]
+print(f"Sample tokens: {tokens}")
+print(f"Sample labels: {labels}")
+
+# %%
+# --- Training Setup ---
+data_collator = DataCollatorForTokenClassification(tokenizer)
+compute_metrics = make_compute_metrics(id2label)
+
+trainer = make_trainer(
+    model=model,
+    train_dataset=train_dataset,
+    eval_dataset=validation_dataset,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    output_dir=str(STANDALONE_RESULTS_DIR / "checkpoints"),
+    # epochs=3,
+    # eval_steps=100,
+    # save_steps=100,
+    # train_batch_size=8,
+    # eval_batch_size=8,
+    # gradient_accumulation_steps=4,
+)
+print("Ready for fine-tuning.")
+
+# %%
+# --- Training ---
+trainer.train()
+trainer.save_model()
+trainer.save_state()
+trainer.push_to_hub()

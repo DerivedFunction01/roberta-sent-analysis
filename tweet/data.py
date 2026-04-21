@@ -6,11 +6,12 @@ from typing import Any
 
 import numpy as np
 from datasets import Dataset, DatasetDict, load_dataset
+from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerBase
 
 from tweet.config import ID2LABEL, LABEL2ID, LABEL_NAMES
-from tweet.mutations import TweetMutator
 from tweet.preprocess import clean_tweet_text
+from text_utils.mutations import TweetMutator
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,7 @@ def build_paired_examples(
     pair_counts = {label: 0 for label in LABEL_NAMES}
     pair_kind_counts = {"same": 0, "mixed": 0}
 
-    for _ in range(num_examples):
+    for _ in tqdm(range(num_examples), desc="Building paired examples"):
         if rng.random() < same_class_ratio:
             label_a = sampler.sample_label()
             label_b = label_a
