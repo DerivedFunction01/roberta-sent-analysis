@@ -14,7 +14,7 @@ from datasets import DatasetDict, concatenate_datasets
 from transformers import AutoTokenizer
 from tqdm.auto import tqdm
 
-from paths import PIPELINE_RESULTS_DIR, SENTIMENT_CACHE_DIR, TOKENIZED_DATASET_DIR
+from paths import path
 from tweet.cache import ensure_clean_sentiment_cache
 from tweet.data import build_tokenized_split
 from tweet.defaults import (
@@ -59,21 +59,23 @@ def main() -> None:
         strip_quotes=STRIP_QUOTE_ARTIFACTS,
         normalize_escapes=NORMALIZE_UNICODE_ESCAPES,
         lowercase_dictionary_caps=NORMALIZE_ALL_CAPS_DICTIONARY_WORDS,
-        cache_dir=SENTIMENT_CACHE_DIR,
+        cache_dir=path("tweet", "sentiment_cache_dir"),
     )
 
-    if TOKENIZED_DATASET_DIR.exists():
-        shutil.rmtree(TOKENIZED_DATASET_DIR)
-    TOKENIZED_DATASET_DIR.mkdir(parents=True, exist_ok=True)
-    PIPELINE_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    tokenized_dataset_dir = path("tweet", "tokenized_dataset_dir")
+    pipeline_results_dir = path("tweet", "pipeline_results_dir")
+    if tokenized_dataset_dir.exists():
+        shutil.rmtree(tokenized_dataset_dir)
+    tokenized_dataset_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_results_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 80)
     print("BUILDING TWEET SENTIMENT TOKENIZED CACHE")
     print("=" * 80)
     print(f"Dataset: {DATASET_NAME} / {SUBSET}")
     print(f"Tokenizer: {model_checkpoint}")
-    print(f"Output: {TOKENIZED_DATASET_DIR}")
-    print(f"Sentiment cache: {SENTIMENT_CACHE_DIR}")
+    print(f"Output: {tokenized_dataset_dir}")
+    print(f"Sentiment cache: {path('tweet', 'sentiment_cache_dir')}")
     print(f"Label map: {label2id}")
     print(f"Cached counts: {cache_meta['counts']}")
 
@@ -113,17 +115,17 @@ def main() -> None:
         )
         tokenized_splits[split_name] = split
         split_summaries[split_name] = summary
-        save_json(TOKENIZED_DATASET_DIR / f"{split_name}_summary.json", summary)
+        save_json(tokenized_dataset_dir / f"{split_name}_summary.json", summary)
 
     dataset_dict = DatasetDict(tokenized_splits)
-    dataset_dict.save_to_disk(str(TOKENIZED_DATASET_DIR))
+    dataset_dict.save_to_disk(str(tokenized_dataset_dir))
     save_json(
-        TOKENIZED_DATASET_DIR / "cache_meta.json",
+        path("tweet", "tokenized_dataset_meta"),
         {
             "dataset_name": DATASET_NAME,
             "subset": SUBSET,
             "model_checkpoint": model_checkpoint,
-            "sentiment_cache_dir": str(SENTIMENT_CACHE_DIR),
+            "sentiment_cache_dir": str(path("tweet", "sentiment_cache_dir")),
             "max_length": MAX_LENGTH,
             "standalone_ratio": STANDALONE_RATIO,
             "same_class_ratio": SAME_CLASS_RATIO,

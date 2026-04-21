@@ -7,21 +7,15 @@ from typing import Any
 from datasets import Dataset, DatasetDict, load_dataset
 from tqdm.auto import tqdm
 
-from paths import (
-    SENTIMENT_CACHE_DIR,
-    SENTIMENT_CACHE_META_FILE,
-    SENTIMENT_CACHE_NEG_FILE,
-    SENTIMENT_CACHE_NEU_FILE,
-    SENTIMENT_CACHE_POS_FILE,
-)
+from paths import path
 from tweet.labels import SENTIMENT_ID2LABEL, SENTIMENT_LABEL2ID, SENTIMENT_LABELS
 from tweet.preprocess import clean_tweet_text
 
 
 _CACHE_FILES = {
-    "neg": SENTIMENT_CACHE_NEG_FILE.name,
-    "neu": SENTIMENT_CACHE_NEU_FILE.name,
-    "pos": SENTIMENT_CACHE_POS_FILE.name,
+    "neg": path("tweet", "sentiment_cache_neg_file").name,
+    "neu": path("tweet", "sentiment_cache_neu_file").name,
+    "pos": path("tweet", "sentiment_cache_pos_file").name,
 }
 
 
@@ -44,7 +38,7 @@ def _normalize_label(value: Any) -> str:
     raise TypeError(f"Unsupported label type: {type(value)!r}")
 
 
-def load_clean_sentiment_cache(cache_dir: Path = SENTIMENT_CACHE_DIR) -> dict[str, Dataset]:
+def load_clean_sentiment_cache(cache_dir: Path = path("tweet", "sentiment_cache_dir")) -> dict[str, Dataset]:
     cache_files = {label: cache_dir / file_name for label, file_name in _CACHE_FILES.items()}
     missing = [path for path in cache_files.values() if not path.exists()]
     if missing:
@@ -62,7 +56,7 @@ def build_clean_sentiment_cache(
     strip_quotes: bool = True,
     normalize_escapes: bool = True,
     lowercase_dictionary_caps: bool = False,
-    cache_dir: Path = SENTIMENT_CACHE_DIR,
+    cache_dir: Path = path("tweet", "sentiment_cache_dir"),
 ) -> tuple[dict[str, Dataset], dict[str, Any]]:
     raw = load_dataset(dataset_name, subset)
     if isinstance(raw, DatasetDict):
@@ -119,7 +113,7 @@ def build_clean_sentiment_cache(
         "total_rows": sum(counts.values()),
         "cache_files": {label: str(path) for label, path in file_map.items()},
     }
-    save_json(cache_dir / SENTIMENT_CACHE_META_FILE.name, meta)
+    save_json(path("tweet", "sentiment_cache_meta_file"), meta)
     return label_datasets, meta
 
 
@@ -133,10 +127,10 @@ def ensure_clean_sentiment_cache(
     strip_quotes: bool = True,
     normalize_escapes: bool = True,
     lowercase_dictionary_caps: bool = False,
-    cache_dir: Path = SENTIMENT_CACHE_DIR,
+    cache_dir: Path = path("tweet", "sentiment_cache_dir"),
 ) -> tuple[dict[str, Dataset], dict[str, Any]]:
     cache_files = {label: cache_dir / file_name for label, file_name in _CACHE_FILES.items()}
-    meta_file = cache_dir / SENTIMENT_CACHE_META_FILE.name
+    meta_file = path("tweet", "sentiment_cache_meta_file")
     if meta_file.exists() and all(path.exists() for path in cache_files.values()):
         return load_clean_sentiment_cache(cache_dir=cache_dir), json.loads(meta_file.read_text(encoding="utf-8"))
     return build_clean_sentiment_cache(

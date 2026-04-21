@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 
-from paths import LABEL_MAP_FILE
+from paths import path
 
 
 def load_label_map() -> dict[str, int]:
-    if not LABEL_MAP_FILE.exists():
-        raise FileNotFoundError(f"Label map not found: {LABEL_MAP_FILE}")
+    label_map_file = path("root", "label_map_file")
+    if not label_map_file.exists():
+        raise FileNotFoundError(f"Label map not found: {label_map_file}")
 
-    with LABEL_MAP_FILE.open(encoding="utf-8") as f:
+    with label_map_file.open(encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"Expected a JSON object in {LABEL_MAP_FILE}")
+        raise ValueError(f"Expected a JSON object in {label_map_file}")
 
     label2id = {str(label): int(idx) for label, idx in data.items()}
     expected_ids = list(range(len(label2id)))

@@ -5,18 +5,34 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-LABEL_MAP_FILE = PROJECT_ROOT / "label2id.json"
-SENTIMENT_CACHE_DIR = PROJECT_ROOT / "sentiment_cache"
-SENTIMENT_CACHE_META_FILE = SENTIMENT_CACHE_DIR / "meta.json"
-SENTIMENT_CACHE_POS_FILE = SENTIMENT_CACHE_DIR / "pos.parquet"
-SENTIMENT_CACHE_NEG_FILE = SENTIMENT_CACHE_DIR / "neg.parquet"
-SENTIMENT_CACHE_NEU_FILE = SENTIMENT_CACHE_DIR / "neu.parquet"
-TOKENIZED_DATASET_DIR = PROJECT_ROOT / "tokenized_dataset"
-TOKENIZED_DATASET_META = TOKENIZED_DATASET_DIR / "cache_meta.json"
+PATHS = {
+    "root": {
+        "label_map_file": PROJECT_ROOT / "label2id.json",
+        "results_dir": PROJECT_ROOT / "results",
+        "default_config_file": PROJECT_ROOT / "evaluation_config.json",
+    },
+    "tweet": {
+        "sentiment_cache_dir": PROJECT_ROOT / "sentiment_cache",
+        "sentiment_cache_meta_file": PROJECT_ROOT / "sentiment_cache" / "meta.json",
+        "sentiment_cache_pos_file": PROJECT_ROOT / "sentiment_cache" / "pos.parquet",
+        "sentiment_cache_neg_file": PROJECT_ROOT / "sentiment_cache" / "neg.parquet",
+        "sentiment_cache_neu_file": PROJECT_ROOT / "sentiment_cache" / "neu.parquet",
+        "tokenized_dataset_dir": PROJECT_ROOT / "tokenized_dataset",
+        "tokenized_dataset_meta": PROJECT_ROOT / "tokenized_dataset" / "cache_meta.json",
+        "standalone_results_dir": PROJECT_ROOT / "results" / "tweet_eval_standalone",
+        "pipeline_results_dir": PROJECT_ROOT / "results" / "tweet_eval_pipeline",
+    },
+    "salad": {
+        "salad_cache_dir": PROJECT_ROOT / "salad_cache",
+        "salad_cache_meta_file": PROJECT_ROOT / "salad_cache" / "meta.json",
+        "salad_results_dir": PROJECT_ROOT / "results" / "salad_data",
+    },
+}
 
-RESULTS_DIR = PROJECT_ROOT / "results"
-STANDALONE_RESULTS_DIR = RESULTS_DIR / "tweet_eval_standalone"
 
-PIPELINE_RESULTS_DIR = RESULTS_DIR / "tweet_eval_pipeline"
-
-DEFAULT_CONFIG_FILE = PROJECT_ROOT / "evaluation_config.json"
+def path(category: str, name: str) -> Path:
+    try:
+        value = PATHS[category][name]
+    except KeyError as exc:
+        raise KeyError(f"Unknown path key: {category}.{name}") from exc
+    return Path(value)

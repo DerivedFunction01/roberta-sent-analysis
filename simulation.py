@@ -8,7 +8,7 @@ from typing import Any
 
 from datasets import concatenate_datasets
 
-from paths import RESULTS_DIR, SENTIMENT_CACHE_DIR
+from paths import path
 from tweet.cache import ensure_clean_sentiment_cache
 from tweet.data import (
     _allocate_counts,
@@ -102,7 +102,7 @@ def main() -> None:
         strip_quotes=STRIP_QUOTE_ARTIFACTS,
         normalize_escapes=NORMALIZE_UNICODE_ESCAPES,
         lowercase_dictionary_caps=NORMALIZE_ALL_CAPS_DICTIONARY_WORDS,
-        cache_dir=SENTIMENT_CACHE_DIR,
+        cache_dir=path("tweet", "sentiment_cache_dir"),
     )
     cached_split = concatenate_datasets(
         [
@@ -192,7 +192,7 @@ def main() -> None:
         print(f"  max source reuse: {combined_summary['max_source_reuse']:,}")
         print(f"  reuse ratio: {reuse_ratio:.2f}")
 
-    output_path = RESULTS_DIR / "simulation_report.json"
+    output_path = path("root", "results_dir") / "simulation_report.json"
     save_json(output_path, {"cache_meta": cache_meta, "reports": reports})
     print(f"\nSaved simulation report to {output_path}")
 
