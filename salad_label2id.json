@@ -1,0 +1,15 @@
+{
+  "O": 0,
+  "B-o1_representation_toxicity": 1,
+  "I-o1_representation_toxicity": 2,
+  "B-o5_malicious_use": 3,
+  "I-o5_malicious_use": 4,
+  "B-o6_human_autonomy_integrity": 5,
+  "I-o6_human_autonomy_integrity": 6,
+  "B-o4_information_safety": 7,
+  "I-o4_information_safety": 8,
+  "B-o2_misinformation_harms": 9,
+  "I-o2_misinformation_harms": 10,
+  "B-o3_socioeconomic_harms": 11,
+  "I-o3_socioeconomic_harms": 12
+}
