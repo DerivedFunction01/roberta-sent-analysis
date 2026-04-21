@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerBase
 from tweet.preprocess import clean_tweet_text
 from text_utils.mutations import TweetMutator
+from tweet.labels import ID2LABEL, LABEL2ID, LABEL_NAMES
 
 
 @dataclass(frozen=True)
