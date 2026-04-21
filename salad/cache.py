@@ -40,7 +40,12 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
 
 def load_local_parquet_dataset(parquet_path: Path) -> Dataset:
     table = pq.read_table(str(parquet_path))
-    return Dataset.from_dict(table.to_pydict())
+    rows = table.to_pylist()
+    for idx, row in enumerate(rows):
+        if row.get("source_id") is None:
+            row["source_id"] = idx
+        row.pop("__index_level_0__", None)
+    return Dataset.from_list(rows)
 
 
 def normalize_label(value: Any) -> str:

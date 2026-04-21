@@ -52,6 +52,16 @@ def _normalize_label(value: Any) -> str:
     raise TypeError(f"Unsupported label type: {type(value)!r}")
 
 
+def _normalize_source_id(value: Any, fallback: int) -> int:
+    if value is None:
+        return int(fallback)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        return int(value)
+    return int(fallback)
+
+
 class PoolSampler:
     def __init__(self, pools: dict[str, list[dict[str, Any]]], *, reuse_limit: int, seed: int) -> None:
         self.pools = pools
@@ -122,7 +132,7 @@ def _build_pools(
         if not text:
             continue
         label = _normalize_label(row[label_column])
-        source_id = int(row.get("source_id", fallback_source_id))
+        source_id = _normalize_source_id(row.get("source_id"), fallback_source_id)
         pools.setdefault(label, []).append(
             {
                 "source_id": source_id,
