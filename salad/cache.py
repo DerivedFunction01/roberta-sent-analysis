@@ -18,6 +18,8 @@ from salad.defaults import (
     JAILBREAK_BENIGN_CACHE_DIR,
     JAILBREAK_BENIGN_LABEL,
     JAILBREAK_DATASET_NAME,
+    JAILBREAK_FILTER_MODEL_FILE,
+    JAILBREAK_FILTER_THRESHOLD,
     JAILBREAK_LABEL_COLUMN,
     JAILBREAK_MAX_SENTENCES,
     JAILBREAK_PROMPT_COLUMN,
@@ -36,6 +38,7 @@ from salad.defaults import (
     SUBSET,
     TEXT_COLUMN,
 )
+from salad.jailbreak_filter import load_filter_model
 
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")

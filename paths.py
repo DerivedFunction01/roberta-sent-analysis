@@ -31,6 +31,8 @@ PATHS = {
         "salad_jailbreak_cache_meta_file": PROJECT_ROOT / "salad_jailbreak_cache" / "meta.json",
         "salad_jailbreak_benign_cache_dir": PROJECT_ROOT / "salad_jailbreak_benign_cache",
         "salad_jailbreak_benign_cache_meta_file": PROJECT_ROOT / "salad_jailbreak_benign_cache" / "meta.json",
+        "salad_jailbreak_filter_dir": PROJECT_ROOT / "results" / "salad_jailbreak_filter",
+        "salad_jailbreak_filter_meta_file": PROJECT_ROOT / "results" / "salad_jailbreak_filter" / "meta.json",
         "salad_label_map_file": PROJECT_ROOT / "salad_label2id.json",
         "salad_tokenized_dataset_dir": PROJECT_ROOT / "salad_tokenized_dataset",
         "salad_tokenized_dataset_meta": PROJECT_ROOT / "salad_tokenized_dataset" / "cache_meta.json",
