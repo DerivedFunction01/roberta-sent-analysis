@@ -27,7 +27,7 @@ class PoolSampler:
         self.max_uses = max(1, reuse_limit + 1)
         self.usage_counts = {label: [0] * len(texts) for label, texts in pools.items()}
         self.label_weights = {
-            label: (1.0 / max(len(texts), 1))
+            label: float(len(texts))
             for label, texts in pools.items()
         }
 
